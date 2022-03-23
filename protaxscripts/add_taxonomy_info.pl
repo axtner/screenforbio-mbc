@@ -18,13 +18,15 @@ open(FD,$cfile) or die "ERROR: cannot read classification output file '$cfile'. 
 while (<FD>) {
     ($seqid,$taxid,$p)=split;
     ($id,$unk) = split(/,/,$taxid);
-    if ($unk eq 'unk') {
-	($level,$taxname)=split(/\t/,$taxinfo{$id});
-	$level++;
-	print "$seqid\t$taxid\t$p\t$level\t$taxname,unk\n";
-    }
-    else {
-	print "$seqid\t$taxid\t$p\t$taxinfo{$id}\n";
-    }
+    if($taxid) {
+      if ($unk eq 'unk') {
+      ($level,$taxname)=split(/\t/,$taxinfo{$id});
+      $level++;
+      print "$seqid\t$taxid\t$p\t$level\t$taxname,unk\n";
+      }
+      else {
+      print "$seqid\t$taxid\t$p\t$taxinfo{$id}\n";
+      }
+    } else {next}
 }
 close(FD);
