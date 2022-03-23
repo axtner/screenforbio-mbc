@@ -5,8 +5,8 @@ set -u
 set -o pipefail
 
 # Send STDOUT and STDERR to log file
-exec > >(tee -a train_weighted_protax.`date +%Y-%m-%d`.log)
-exec 2> >(tee -a train_weighted_protax.`date +%Y-%m-%d`.log >&2)
+exec > >(tee -a train_weighted_protax.`date +%Y%m%d`.log)
+exec 2> >(tee -a train_weighted_protax.`date +%Y%m%d`.log >&2)
 
 ##### INFO
 
@@ -14,7 +14,7 @@ exec 2> >(tee -a train_weighted_protax.`date +%Y-%m-%d`.log >&2)
 
 # for selecting training data, running required LAST searches and protax model parameterisation
 
-# written by Alex Crampton-Platt for Andreas Wilting (IZW, ScreenForBio project)
+# written by Alex Crampton-Platt for Andreas Wilting (IZW, ScreenForBio project), edited by Jan Axtner 20220323
 
 # usage: bash train_weighted_protax.sh splist taxonomy screenforbio
 # where:
@@ -32,7 +32,7 @@ then
 	echo "You are trying to use train_weighted_protax.sh but have not provided enough information."
 	echo "Please check the following:"
 	echo ""
-	echo "usage: bash train_weighted_protax.sh splist taxon screenforbio"
+	echo "usage: bash train_weighted_protax.sh splist taxon screenforbio marker"
 	echo "where:"
   echo "splist is a list of expected species to use in weighing in the format Genus,species (e.g. Homo,sapiens)"
   echo "taxonomy is the final protax-formatted taxonomy file from get_sequences.sh (e.g. Tetrapoda.final_protax_taxonomy.txt)"
@@ -53,78 +53,84 @@ fi
 SPLIST=${1}
 TAXONOMY=${2}
 SCRIPTS=${3}
-DATE=`date +%Y-%m-%d`
+DATE=`date +%Y%m%d`
 taxon=$(basename ${TAXONOMY} | cut -f1 -d".")
 
 ##### MAIN
 start=`date +%s`
+
 # get file names
-if ls ${taxon}.final_database.*.fa 1> /dev/null 2>&1
-then
-FILES=($(find . -mindepth 1 -maxdepth 1 -type f -name "${taxon}.final_database.*.fa" | sed 's/\.\///g'))
-else
-  echo "No matching FASTA databases found."
-  echo ""
-  exit 1
+if ls ${taxon}.database.*.fa 1> /dev/null 2>&1
+  then
+    FILES=($(find . -mindepth 1 -maxdepth 1 -type f -name "${taxon}.database.*.fa" | sed 's/\.\///g'))
+  else
+    echo "No matching FASTA databases found."
+    echo ""
+    exit 1
 fi
+
 echo "Step 1: make taxonomy priors"
 for file in ${FILES[@]}
 do
-  locus=$(basename $file ".fa" | cut -f3 -d".")
+  locus=$(basename $file ".fa" | cut -f4 -d".")
+  ref_date=$(basename $file ".fa" | cut -f3 -d".")
   echo "Working on ${locus}"
-  mkdir ./w_model_${locus}
-  perl ${SCRIPTS}/protaxscripts/maketaxonomy.pl ${TAXONOMY} > ./w_model_${locus}/taxonomy
-  perl ${SCRIPTS}/protaxscripts/taxonomy_priors.pl ./w_model_${locus}/taxonomy > ./w_model_${locus}/tax4
-  grep -f ${SPLIST} ./w_model_${locus}/tax4 > ./w_model_${locus}/expected_sp
-  perl ${SCRIPTS}/protaxscripts/setpriors.pl 0.9 ./w_model_${locus}/expected_sp ./w_model_${locus}/tax4 > ./w_model_${locus}/wtax4
-  rm ./w_model_${locus}/tax4
-  rm ./w_model_${locus}/expected_sp
-  perl ${SCRIPTS}/protaxscripts/thintaxonomy.pl 1 ./w_model_${locus}/wtax4 > ./w_model_${locus}/wtax1
-  perl ${SCRIPTS}/protaxscripts/thintaxonomy.pl 2 ./w_model_${locus}/wtax4 > ./w_model_${locus}/wtax2
-  perl ${SCRIPTS}/protaxscripts/thintaxonomy.pl 3 ./w_model_${locus}/wtax4 > ./w_model_${locus}/wtax3
+  mkdir ./w_model_${DATE}_${locus}
+  perl ${SCRIPTS}/protaxscripts/maketaxonomy.pl ${TAXONOMY} > ./w_model_${DATE}_${locus}/taxonomy
+  perl ${SCRIPTS}/protaxscripts/taxonomy_priors.pl ./w_model_${DATE}_${locus}/taxonomy > ./w_model_${DATE}_${locus}/tax4
+  grep -f ${SPLIST} ./w_model_${DATE}_${locus}/tax4 > ./w_model_${DATE}_${locus}/expected_sp
+  perl ${SCRIPTS}/protaxscripts/setpriors.pl 0.9 ./w_model_${DATE}_${locus}/expected_sp ./w_model_${DATE}_${locus}/tax4 > ./w_model_${DATE}_${locus}/wtax4
+  rm ./w_model_${DATE}_${locus}/tax4
+  rm ./w_model_${DATE}_${locus}/expected_sp
+  perl ${SCRIPTS}/protaxscripts/thintaxonomy.pl 1 ./w_model_${DATE}_${locus}/wtax4 > ./w_model_${DATE}_${locus}/wtax1
+  perl ${SCRIPTS}/protaxscripts/thintaxonomy.pl 2 ./w_model_${DATE}_${locus}/wtax4 > ./w_model_${DATE}_${locus}/wtax2
+  perl ${SCRIPTS}/protaxscripts/thintaxonomy.pl 3 ./w_model_${DATE}_${locus}/wtax4 > ./w_model_${DATE}_${locus}/wtax3
 done
 echo ""
 echo "Step 2: generate training data"
 for file in ${FILES[@]}
 do
-  locus=$(basename $file ".fa" | cut -f3 -d".")
+  locus=$(basename $file ".fa" | cut -f4 -d".")
+  ref_date=$(basename $file ".fa" | cut -f3 -d".")
   echo "Working on ${locus}"
-  perl ${SCRIPTS}/protaxscripts/initialseqid2tax.pl ./w_model_${locus}/taxonomy ${taxon}.final_database.${locus}.fa > ./w_model_${locus}/seq2tax4
+  perl ${SCRIPTS}/protaxscripts/initialseqid2tax.pl ./w_model_${DATE}_${locus}/taxonomy ${taxon}.database.${ref_date}.${locus}.fa > ./w_model_${DATE}_${locus}/seq2tax4
   for LEVEL in 1 2 3 4
   do
     echo "LEVEL ${LEVEL}"
-    perl ${SCRIPTS}/protaxscripts/makeseqid2tax.pl $LEVEL ./w_model_${locus}/seq2tax4 > ./w_model_${locus}/ref.wtax$LEVEL
-    perl ${SCRIPTS}/protaxscripts/get1layer_reference_sequences_all.pl $LEVEL ./w_model_${locus}/wtax$LEVEL ./w_model_${locus}/ref.wtax$LEVEL ./w_model_${locus}/rseqs$LEVEL
-    perl ${SCRIPTS}/protaxscripts/generate_training_data.pl ./w_model_${locus}/wtax$LEVEL ./w_model_${locus}/ref.wtax$LEVEL ./w_model_${locus}/rseqs$LEVEL 4500 1 no ./w_model_${locus}/train.w.level$LEVEL
-    perl ${SCRIPTS}/protaxscripts/generate_unk_training_data.pl $LEVEL ./w_model_${locus}/wtax$LEVEL ./w_model_${locus}/ref.wtax$LEVEL ./w_model_${locus}/rseqs$LEVEL 500 1 no ./w_model_${locus}/train.w.unk$LEVEL
-    cat ./w_model_${locus}/train.w.level$LEVEL ./w_model_${locus}/train.w.unk$LEVEL > ./w_model_${locus}/train.w$LEVEL
-    cut -f6 -d" " ./w_model_${locus}/train.w$LEVEL | sort | uniq > ./w_model_${locus}/train.w${LEVEL}.id
+    perl ${SCRIPTS}/protaxscripts/makeseqid2tax.pl $LEVEL ./w_model_${DATE}_${locus}/seq2tax4 > ./w_model_${DATE}_${locus}/ref.wtax$LEVEL
+    perl ${SCRIPTS}/protaxscripts/get1layer_reference_sequences_all.pl $LEVEL ./w_model_${DATE}_${locus}/wtax$LEVEL ./w_model_${DATE}_${locus}/ref.wtax$LEVEL ./w_model_${DATE}_${locus}/rseqs$LEVEL
+    perl ${SCRIPTS}/protaxscripts/generate_training_data.pl ./w_model_${DATE}_${locus}/wtax$LEVEL ./w_model_${DATE}_${locus}/ref.wtax$LEVEL ./w_model_${DATE}_${locus}/rseqs$LEVEL 4500 1 no ./w_model_${DATE}_${locus}/train.w.level$LEVEL
+    perl ${SCRIPTS}/protaxscripts/generate_unk_training_data.pl $LEVEL ./w_model_${DATE}_${locus}/wtax$LEVEL ./w_model_${DATE}_${locus}/ref.wtax$LEVEL ./w_model_${DATE}_${locus}/rseqs$LEVEL 500 1 no ./w_model_${DATE}_${locus}/train.w.unk$LEVEL
+    cat ./w_model_${DATE}_${locus}/train.w.level$LEVEL ./w_model_${DATE}_${locus}/train.w.unk$LEVEL > ./w_model_${DATE}_${locus}/train.w$LEVEL
+    cut -f6 -d" " ./w_model_${DATE}_${locus}/train.w$LEVEL | sort | uniq > ./w_model_${DATE}_${locus}/train.w${LEVEL}.id
   done
-  cat ./w_model_${locus}/train.w[1,2,3,4].id | sort | uniq > ./w_model_${locus}/train.w.ids
-  perl ${SCRIPTS}/protaxscripts/fastagrep.pl ./w_model_${locus}/train.w.ids ${taxon}.final_database.${locus}.fa > ./w_model_${locus}/training_${locus}.fa
+  cat ./w_model_${DATE}_${locus}/train.w[1,2,3,4].id | sort | uniq > ./w_model_${DATE}_${locus}/train.w.ids
+  perl ${SCRIPTS}/protaxscripts/fastagrep.pl ./w_model_${DATE}_${locus}/train.w.ids ${taxon}.database.${ref_date}.${locus}.fa > ./w_model_${DATE}_${locus}/training_${locus}.fa
 done
 echo ""
 echo "Step 3: run LAST searches"
 echo "This may take some time..."
 for file in ${FILES[@]}
 do
-  locus=$(basename $file ".fa" | cut -f3 -d".")
+  locus=$(basename $file ".fa" | cut -f4 -d".")
+  ref_date=$(basename $file ".fa" | cut -f3 -d".")
   echo "Working on ${locus}"
-  lastdb ./w_model_${locus}/lastref_${locus} ${taxon}.final_database.${locus}.fa
-  lastal -T 1 -a 1 -f 0 -m 1000 ./w_model_${locus}/lastref_${locus} ./w_model_${locus}/training_${locus}.fa > ./w_model_${locus}/training.last
-  perl ${SCRIPTS}/protaxscripts/last2sim.pl ./w_model_${locus}/training.last > ./w_model_${locus}/train.w.lastsim
-  rm ./w_model_${locus}/training.last
+  lastdb ./w_model_${DATE}_${locus}/lastref_${locus} ${taxon}.database.${ref_date}.${locus}.fa
+  lastal -T 1 -a 1 -f 0 -m 1000 ./w_model_${DATE}_${locus}/lastref_${locus} ./w_model_${DATE}_${locus}/training_${locus}.fa > ./w_model_${DATE}_${locus}/training.last
+  perl ${SCRIPTS}/protaxscripts/last2sim.pl ./w_model_${DATE}_${locus}/training.last > ./w_model_${DATE}_${locus}/train.w.lastsim
+  rm ./w_model_${DATE}_${locus}/training.last
 done
 echo ""
 echo "Step 4: make x-matrices for input to R"
 for file in ${FILES[@]}
 do
-  locus=$(basename $file ".fa" | cut -f3 -d".")
+  locus=$(basename $file ".fa" | cut -f4 -d".")
+  ref_date=$(basename $file ".fa" | cut -f3 -d".")
   echo "Working on ${locus}"
   for LEVEL in 1 2 3 4
   do
     echo "LEVEL ${LEVEL}"
-    perl ${SCRIPTS}/protaxscripts/create1layer_xdata4.pl ./w_model_${locus}/train.w$LEVEL ./w_model_${locus}/wtax$LEVEL ./w_model_${locus}/ref.wtax$LEVEL ./w_model_${locus}/rseqs$LEVEL ./w_model_${locus}/train.w.lastsim ./w_model_${locus}/train.w${LEVEL}.xdat 1
+    perl ${SCRIPTS}/protaxscripts/create1layer_xdata4.pl ./w_model_${DATE}_${locus}/train.w$LEVEL ./w_model_${DATE}_${locus}/wtax$LEVEL ./w_model_${DATE}_${locus}/ref.wtax$LEVEL ./w_model_${DATE}_${locus}/rseqs$LEVEL ./w_model_${DATE}_${locus}/train.w.lastsim ./w_model_${DATE}_${locus}/train.w${LEVEL}.xdat 1
   done
 done
 echo ""
